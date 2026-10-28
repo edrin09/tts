@@ -1,0 +1,19 @@
+# ---- 大件：不入库（可重新下载/安装）----
+.venv/
+models/
+
+# ---- 运行产物：可再生 ----
+cache/
+out/
+logs/
+__pycache__/
+*.py[cod]
+*.log
+
+# ---- 音频产物 ----
+*.wav
+*.mp3
+
+# ---- 工具临时 ----
+.workbuddy/tmp/
+/.workbuddy

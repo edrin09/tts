@@ -1,0 +1,105 @@
+# TTS 朗读项目依赖锁（Python 3.12.15 / Windows）
+#
+# 复原：uv venv --python 3.12 .venv
+#       uv pip install -r requirements.txt
+#
+# 2026-10-28 精简：原始 101 包 → 81 包（卸掉 pydantic/httpx2/cryptography/
+# loguru/msgpack/fsspec/smart-open/narwhals 等 19 个从没被引用过的残留 + pip 自身）。
+# 卸载前后做了逐字节回归：G2P 音素串哈希、合成音频采样点数、时长全部一致，
+# 在线 edge-tts、本地 ONNX、ASR(SenseVoice int8) 三条链路均实测通过。
+#
+# 注意：本项目已封版，版本号全部钉死，升级任何一个都可能改变中文 G2P 行为。
+
+# ============ 一、直接依赖（代码里 import 的）============
+sherpa-onnx==2.0.1
+sherpa-onnx-core==2.0.1
+onnxruntime==1.31.1
+numpy==2.5.4
+misaki==0.9.4
+jieba==0.42.1
+edge-tts==7.3.1
+sounddevice==0.5.6
+soundfile==0.14.0
+pynput==1.8.2
+pystray==0.19.5
+pillow==13.0.0
+psutil==7.2.2
+uiautomation==2.0.29
+requests==2.34.2
+
+# setuptools 不是给打包用的，是运行期硬依赖：cn2an/utils.py 里有一句
+# `from pkg_resources import resource_stream`，而 cn2an 的包元数据没声明这个依赖。
+# 新版 uv venv 默认不装 setuptools，漏了它 → 中文数字转换直接 ImportError。
+setuptools==84.2.1
+
+# ============ 二、misaki 语音前端（中/英 G2P 必需的 extras）============
+# 中文：cn2an/pypinyin/pypinyin-dict/ordered-set/jieba（jieba 已在上面）
+# 英文：espeakng-loader/phonemizer-fork/num2words —— core/en_g2p.py 用
+#       misaki.espeak.EspeakFallback 兜底英文，绕开了 spacy+torch
+cn2an==0.5.24
+pypinyin==0.55.0
+pypinyin-dict==0.9.0
+ordered-set==4.1.0
+espeakng-loader==0.2.4
+phonemizer-fork==3.3.2
+num2words==0.5.14
+
+# ============ 三、传递依赖（勿手动增删）============
+addict==2.4.0
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.5
+aiosignal==1.4.0
+anyio==4.15.1
+attrs==26.1.0
+babel==2.18.0
+certifi==2026.10.23
+cffi==2.1.1
+charset-normalizer==3.5.2
+click==8.5.0
+cloudpickle==3.1.2
+colorama==0.4.6
+comtypes==1.4.17
+csvw==4.1.1
+dlinfo==2.0.0
+docopt==0.6.2
+filelock==4.2.4
+flatbuffers==25.12.19
+frozenlist==1.8.0
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.20
+isodate==0.7.2
+joblib==1.6.0
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+language-tags==1.3.2
+markdown-it-py==4.2.0
+mdurl==0.1.2
+multidict==7.2.1
+packaging==26.3
+proces==0.1.7
+propcache==0.5.4
+protobuf==7.36.2
+pycparser==3.12
+pygments==2.21.0
+pyparsing==3.3.3
+python-dateutil==3.0.0
+pywin32==312
+pyyaml==6.0.3
+rdflib==7.6.0
+referencing==0.37.0
+regex==2026.9.29
+rfc3986==1.5.0
+rich==15.0.0
+rpds-py==2026.9.1
+segments==2.4.0
+six==1.17.0
+tabulate==0.10.0
+termcolor==3.3.0
+tqdm==4.70.1
+typing-extensions==4.16.0
+tzdata==2026.5
+uritemplate==4.2.0
+urllib3==2.8.0
+yarl==1.25.1
