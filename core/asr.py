@@ -16,10 +16,9 @@
 中间隔一层 HTTP 只会增加复杂度。模型懒加载 + 仅在使用期间驻留，
 不用 ASR 就不付内存。TTS 引擎切换只重启服务进程，互不影响。
 
-在线通道（留口子）
-------------------
-config.ASR_ONLINE_URL / ASR_ONLINE_KEY 都填了就算启用。协议约定见 .env 注释：
-POST wav(base64) → {"text": "..."}。没有流式 partial，松手后整段上传识别。
+在线通道
+--------
+讯飞听写在 core/asr_xfyun.py（流式 WS + HTTP 兜底），本文件只管本地模型。
 """
 import base64
 import gc
@@ -218,26 +217,3 @@ class _OfflineSession:
 
 
 LOCAL = LocalAsr()
-
-
-def online_available():
-    return bool(config.ASR_ONLINE_URL)
-
-
-def online_transcribe(samples, sr=16000, timeout=15):
-    """在线通道：整段 wav POST 到配置的 URL，返回识别文本。
-
-    协议（.env 里写的约定）：POST {url}，Authorization: Bearer {key}，
-    body {"audio": "<wav base64>"}，响应 {"text": "..."}。
-    """
-    import requests
-    wav = samples_to_wav_bytes(samples, sr)
-    headers = {'Content-Type': 'application/json'}
-    if config.ASR_ONLINE_KEY:
-        headers['Authorization'] = f'Bearer {config.ASR_ONLINE_KEY}'
-    r = requests.post(config.ASR_ONLINE_URL,
-                      json={'audio': base64.b64encode(wav).decode('ascii'),
-                            'sample_rate': sr},
-                      headers=headers, timeout=timeout)
-    r.raise_for_status()
-    return (r.json().get('text') or '').strip()

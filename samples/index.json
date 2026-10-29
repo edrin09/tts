@@ -1,0 +1,66 @@
+[
+ {
+  "file": "1_小燕.wav",
+  "voice": "小燕",
+  "tag": "女·基础",
+  "vcn": "xiaoyan",
+  "chunks": 2,
+  "dur": 14.91
+ },
+ {
+  "file": "2_小萍.wav",
+  "voice": "小萍",
+  "tag": "女·基础",
+  "vcn": "aisxping",
+  "chunks": 2,
+  "dur": 17.44
+ },
+ {
+  "file": "3_小婧.wav",
+  "voice": "小婧",
+  "tag": "女·基础",
+  "vcn": "aisjinger",
+  "chunks": 2,
+  "dur": 17.82
+ },
+ {
+  "file": "4_许小宝.wav",
+  "voice": "许小宝",
+  "tag": "童声·基础",
+  "vcn": "aisbabyxu",
+  "chunks": 2,
+  "dur": 16.76
+ },
+ {
+  "file": "5_许久.wav",
+  "voice": "许久",
+  "tag": "男·基础",
+  "vcn": "aisjiuxu",
+  "chunks": 2,
+  "dur": 17.42
+ },
+ {
+  "file": "6_小峰.wav",
+  "voice": "小峰",
+  "tag": "男·基础",
+  "vcn": "xiaofeng",
+  "chunks": 2,
+  "dur": 14.57
+ },
+ {
+  "file": "7_叶子.wav",
+  "voice": "叶子",
+  "tag": "女·超拟人",
+  "vcn": "x4_yezi",
+  "chunks": 2,
+  "dur": 14.05
+ },
+ {
+  "file": "8_小燕_整段不切.wav",
+  "voice": "小燕",
+  "tag": "整段不切（对照）",
+  "vcn": "xiaoyan",
+  "chunks": 1,
+  "dur": 15.12
+ }
+]

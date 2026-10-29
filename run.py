@@ -230,8 +230,9 @@ def main(argv=None):
     ap.add_argument('--stop', action='store_true', help='停掉服务')
     ap.add_argument('--status', action='store_true', help='看状态')
     ap.add_argument('--autostart', choices=['on', 'off', 'status'], help='开机自启')
-    ap.add_argument('--engine', choices=['local', 'online', 'status'],
-                    help='切换/查看合成引擎（local=本地 ONNX, online=Edge 在线）')
+    ap.add_argument('--engine', choices=['local', 'xfyun', 'edge', 'status'],
+                    help='切换/查看合成引擎（local=本地 ONNX, xfyun=讯飞在线, '
+                         'edge=Edge 在线免费不限量）')
     ap.add_argument('--debug', action='store_true')
     args = ap.parse_args(argv)
 
@@ -256,7 +257,7 @@ def main(argv=None):
         if args.engine == 'status':
             h = service_health()
             cur = (h or {}).get('engine') or config.ENGINE
-            print(f'引擎：{cur}（{"在线 Edge TTS" if cur == "online" else "本地 ONNX"}）')
+            print(f'引擎：{cur}（{config.ENGINE_LABELS.get(cur, cur)}）')
             if h:
                 print(f'服务：运行中  rss={h.get("rss_mb")}MB')
             else:

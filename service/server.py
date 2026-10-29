@@ -337,16 +337,23 @@ def watch_parent(srv, pid):
 def build():
     """按 TTS_ENGINE 建引擎 + 起缓存/任务仓储，返回 (server, engine)
 
-    online 模式不 import onnxruntime、不加载 G2P —— 这是「切换在线模型省 700MB」
-    的根本原因：省内存靠的是换进程（重启服务），不是在同一进程里卸载模型。
+    local 之外的两种在线模式都不 import onnxruntime、不加载 G2P —— 这是「切换在线
+    模型省 700MB」的根本原因：省内存靠的是换进程（重启服务），不是在同一进程里
+    卸载模型。
     """
     t0 = time.perf_counter()
 
-    if config.ENGINE == 'online':
-        from core.engine_online import EdgeEngine
-        eng = EdgeEngine()
+    if config.ENGINE == 'xfyun':
+        from core.engine_xfyun import XfyunEngine
+        eng = XfyunEngine()
         eng.load()
         eng.warmup()  # 在线引擎的预热就是连通性自检，失败只警告不拖垮启动
+        load_s = round(time.perf_counter() - t0, 2)
+    elif config.ENGINE == 'edge':
+        from core.engine_edge import EdgeEngine
+        eng = EdgeEngine()
+        eng.load()
+        eng.warmup()  # 同上：真合成一句，顺手预热 DNS/TLS
         load_s = round(time.perf_counter() - t0, 2)
     else:
         # 英文前端（espeak-ng）首次初始化 ~1.25s，会让「英文出现在首块」的首字从 0.86s 涨到 2.19s。
@@ -379,7 +386,7 @@ def build():
                        f'{config.CACHE_SALT}-{config.ENGINE}')
     store = TaskStore(eng, cache, config.CACHE_DIR, config.TASK_KEEP)
     STATE.update(engine=eng, engine_kind=config.ENGINE, load_s=load_s, cache=cache,
-                 store=store, voices=[config.VOICE_FEMALE, config.VOICE_MALE])
+                 store=store, voices=[v for v, _ in config.voice_choices()])
     log.info('引擎就绪 kind=%s load=%ss threads=%s rss=%sMB',
              config.ENGINE, load_s, eng.threads, _rss_mb())
 

@@ -48,34 +48,44 @@ class Tray:
             return act
 
         # 语音引擎：切换要 10~14s，切换中由 App 把菜单项置灰挡重复点击
+        # 勾选状态一律走「闭包工厂」—— pystray 用 co_argcount 校验回调，
+        # 带默认参数的 lambda（lambda item, k=... ）会被当成 2 参回调传两个值，
+        # 症状是整个托盘线程挂掉（图标消失），别图省事。
+        def checked_engine(kind):
+            return lambda item: self.app.engine_kind == kind and not self.app.switching
+
+        def enabled_engine(item):
+            return not self.app.switching
+
         engine_menu = pystray.Menu(
-            pystray.MenuItem('在线模型',
-                             switch_action(self.app.switch_engine, 'online'),
-                             radio=True,
-                             enabled=lambda item: not self.app.switching,
-                             checked=lambda item: self.app.engine_online
-                             and not self.app.switching),
+            pystray.MenuItem('Edge 在线（免费不限量）',
+                             switch_action(self.app.switch_engine, 'edge'),
+                             radio=True, enabled=enabled_engine,
+                             checked=checked_engine('edge')),
+            pystray.MenuItem('讯飞在线',
+                             switch_action(self.app.switch_engine, 'xfyun'),
+                             radio=True, enabled=enabled_engine,
+                             checked=checked_engine('xfyun')),
             pystray.MenuItem('本地模型',
                              switch_action(self.app.switch_engine, 'local'),
-                             radio=True,
-                             enabled=lambda item: not self.app.switching,
-                             checked=lambda item: not self.app.engine_online
-                             and not self.app.switching))
+                             radio=True, enabled=enabled_engine,
+                             checked=checked_engine('local')))
 
-        # 识别引擎：在线项仅在 .env 配好 ASR_ONLINE_URL/KEY 时可点
+        # 识别引擎：在线项仅在 .env 配好凭据时可点。
+        # 顺序跟上面的语音引擎一致 —— 在线在上、本地模型统一放最下面
         asr_menu = pystray.Menu(
-            pystray.MenuItem('本地模型',
-                             switch_action(self.app.set_dictate_engine, 'local'),
-                             radio=True,
-                             checked=lambda item: bool(self.app.dictate and
-                                                       self.app.dictate.engine == 'local')),
-            pystray.MenuItem('在线模型',
-                             switch_action(self.app.set_dictate_engine, 'online'),
+            pystray.MenuItem('讯飞听写',
+                             switch_action(self.app.set_dictate_engine, 'xfyun'),
                              radio=True,
                              enabled=lambda item: bool(self.app.dictate and
                                                        self.app.dictate.online_ready()),
                              checked=lambda item: bool(self.app.dictate and
-                                                       self.app.dictate.engine == 'online')))
+                                                       self.app.dictate.engine == 'xfyun')),
+            pystray.MenuItem('本地模型',
+                             switch_action(self.app.set_dictate_engine, 'local'),
+                             radio=True,
+                             checked=lambda item: bool(self.app.dictate and
+                                                       self.app.dictate.engine == 'local')))
 
         # 语音输入：定向开/关（点「开」就是开，不会翻转），首次开才初始化听写
         dictate_menu = pystray.Menu(

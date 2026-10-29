@@ -257,7 +257,7 @@ class Dictate:
         self.app = app
         self.win = ListenWindow().start()
         self.enabled = True          # 托盘可关；启动时由 app 用偏好覆盖
-        self.engine = 'local'        # local / online（online 需配置 URL）
+        self.engine = 'local'        # local / xfyun（xfyun 需在 .env 配讯飞凭据）
         self._listener = None
         self._lock = threading.Lock()
         self._grace = None           # 宽限 Timer
@@ -343,8 +343,9 @@ class Dictate:
         return self._state
 
     def online_ready(self):
-        from core import asr
-        return asr.online_available()
+        """在线识别是否可用（讯飞听写：凭据齐了就可用）"""
+        from core import asr_xfyun
+        return asr_xfyun.ready()
 
     # ---------------------------- 键盘事件 ----------------------------
 
@@ -442,28 +443,49 @@ class Dictate:
     def _session(self):
         """一次说话会话：开麦 → 喂识别 → （Alt 松开）→ 取终稿 → 打字。
 
+        三条通道（self.engine + .env 协议）：
+          local  —— 本地 SenseVoice，partial 靠整段重解码模拟
+          ws     —— 讯飞听写流式，40ms 一帧送上去，partial 是服务端真增量
+          http   —— 讯飞（或代理）的整段上传接口，只攒音频，松手才发
+
         全部主体都包在 try/finally 里：无论哪种结局（取消/出错/正常），finally
         都会把状态复位到 idle、关窗、清 abort 标志。之前 abort 竞态兜底写在
         try 外面提前 return，会让状态永远卡在 finishing、PTT 失效 —— 单测抓的。
         """
         from core import asr
+        from core import asr_xfyun
         stop, cancel = threading.Event(), threading.Event()
         self._stop_evt, self._cancel_evt = stop, cancel
         x, y = _cursor_pos()
         self._audio_q = queue.Queue()
         text, t_start, sr = '', None, config.ASR_SAMPLE_RATE
         stream = sess = None
-        online = False
+        mode = 'local'
+        http_buf = []
         try:
             if self._abort.is_set():        # 取消抢在会话启动前（竞态兜底）
                 return
-            online = self.engine == 'online' and self.online_ready()
-            if not online:
+            # 先把小窗弹出来再连服务：建 ws 要走握手（实测 0.9s，网络差时更久），
+            # 放在 show 之前的话这段时间屏幕上一片安静，用户会以为「按住 Alt 没反应」
+            self.win.show(x, y, '正在听…')
+            if self.engine == 'xfyun' and self.online_ready():
+                mode = 'ws' if asr_xfyun.protocols()[0] == 'ws' else 'http'
+                if mode == 'ws':
+                    try:
+                        sess = asr_xfyun.open_session()   # 连不上会自己退到 http 并返回 None
+                    except Exception as e:
+                        log.error('讯飞听写连接失败: %s', e)
+                        self.win.update(f'听写连不上：{e}')
+                        self.app and self.app._notify(f'讯飞听写连不上：{e}')
+                        return
+                    if sess is None:
+                        mode = 'http'
+            if mode == 'local':
                 # 首次会加载 1~2s，窗口先给个提示（关掉再开模型已卸载，会重新加载）
                 if not asr.LOCAL.loaded:
-                    self.win.show(x, y, '语音识别加载中（约 2 秒）…')
+                    self.win.update('语音识别加载中（约 2 秒）…')
                 sess = asr.LOCAL.session()
-            self.win.show(x, y, '正在听…')
+            self.win.update('正在听…')
             self.stats['sessions'] += 1
 
             # --- 开麦（16k 优先，失败回退设备默认率，识别前重采样） ---
@@ -495,7 +517,10 @@ class Dictate:
                     chunk = self._audio_q.get(timeout=0.25)
                 except queue.Empty:
                     continue
-                if not online and sess is not None:
+                if mode == 'http':
+                    http_buf.append(chunk)      # 这条通道没有 partial，先攒着
+                    continue
+                if sess is not None:
                     sess.accept(chunk)
                     p = sess.partial()
                     if p:
@@ -504,26 +529,27 @@ class Dictate:
             stream.stop()
             stream.close()
             stream = None
-            self.win.update('识别中…' if online else '松手，识别中…')
+            self.win.update('松手，识别中…' if mode == 'local' else '识别中…')
 
             if cancel.is_set():
+                if sess is not None:
+                    sess.cancel()
                 return
             # --- 取终稿 ---
-            if online:
-                samples = []
-                while True:
-                    try:
-                        samples.append(self._audio_q.get_nowait())
-                    except queue.Empty:
-                        break
-                if not samples:
+            if mode == 'http':
+                if not http_buf:
                     self.stats['empty'] += 1
                     return
-                text = asr.online_transcribe(np.concatenate(samples), sr)
+                text = asr_xfyun.http_transcribe(np.concatenate(http_buf), sr)
             else:
                 text = sess.finish() if sess is not None else ''
             text = (text or '').strip()
         except Exception as e:
+            if sess is not None:
+                try:
+                    sess.cancel()
+                except Exception:
+                    pass
             log.error('语音识别会话失败: %s', e, exc_info=True)
             self.app and self.app._notify(f'语音识别出错：{e}')
             return
@@ -532,6 +558,13 @@ class Dictate:
                 try:
                     stream.stop()
                     stream.close()
+                except Exception:
+                    pass
+            # 讯飞会话可能因为「中途取消/异常 return」没走到 finish，别把 WS 挂着
+            # （finish 之后 cancel 是空操作，重复调用无害；本地 session 没有这个方法）
+            if sess is not None and mode != 'local':
+                try:
+                    sess.cancel()
                 except Exception:
                     pass
             self._stop_evt = self._cancel_evt = None

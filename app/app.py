@@ -80,11 +80,12 @@ class App:
         # 任务，player 那边无处可切（返回 no_task），但用户的意思是「下次用这个
         # 速度念」，所以偏好存在 App 这一层，speak 时带下去；并落盘，重开还在。
         self.rate = self._load_pref()
-        # 当前音色。在线模式可挑 Edge 神经音色；本地模式只有男女声。
+        # 当前引擎。以服务 health 实报为准（_sync_engine），config.ENGINE 只是初值。
+        # 必须放在音色之前 —— 音色要按引擎的可选表做清洗（_load_voice_pref）
+        self._engine = config.ENGINE
+        # 当前音色。本地只有男女声；讯飞/Edge 各有自己的音色表（见 config.voice_choices）。
         # 存盘逻辑与倍速同一份 pref.json，重开还在。
         self.voice = self._load_voice_pref()
-        # 当前引擎。以服务 health 实报为准（_sync_engine），config.ENGINE 只是初值
-        self._engine = config.ENGINE
         # 引擎切换进行中的标记：切换要 10~14s，期间托盘的引擎项置灰，
         # 重复点击一律挡掉（半路再点会跟 restart_service 抢服务进程）
         self._switching = False
@@ -137,11 +138,8 @@ class App:
                 'voices': self._voice_options()}
 
     def _voice_options(self):
-        """当前引擎下可选的音色 [(key, label)]。本地只有男女声，在线用 Edge 表。"""
-        if self.engine_online:
-            from core.engine_online import ONLINE_VOICES
-            return list(ONLINE_VOICES)
-        return [('female', '女声'), ('male', '男声')]
+        """当前引擎下可选的音色 [(key, label)]：本地男女声，讯飞给免费发音人表。"""
+        return config.voice_choices()
 
     def _on_mouse_down(self, x, y):
         """左键按下：点在浮窗外就收起来。
@@ -228,9 +226,9 @@ class App:
             self._notify('没选中文字')
             return dict(ok=False, reason='empty', method=how)
         self._t_trigger = t0
-        # 本地引擎只有男女声；选了在线音色又切回本地时，兜底回配置默认
+        # 音色要跟当前引擎对得上：选了 Edge 的 Neural 名又切回本地/讯飞时，兜底回默认
         voice = self.voice
-        if not self.engine_online and voice not in ('female', 'male'):
+        if not config.voice_ok(voice, self._engine):
             voice = config.VOICE_DEFAULT
         try:
             info = self.player.speak(text, voice=voice, rate=self.rate)
@@ -279,11 +277,15 @@ class App:
 
     def _load_voice_pref(self):
         """上次用的音色。读不到就用配置默认（female）。
-        本地引擎不认识在线音色名，朗读前会在 read_selection 里兜底回男女声。"""
+
+        跨引擎会留下不认识的音色名（比如 Edge 的 zh-CN-XiaoxiaoNeural 切到讯飞、
+        本地的 zf_001 切到 Edge），这里按**当前引擎的可选表**清洗一次，
+        免得每次朗读都吃一次端点拒绝/静默降级。
+        """
         try:
             d = json.loads(self._pref_file().read_text(encoding='utf-8'))
             v = str(d.get('voice') or '').strip()
-            if v:
+            if v and config.voice_ok(v, self._engine):
                 return v
         except Exception:
             pass
@@ -330,16 +332,28 @@ class App:
         return bool(self.dictate.enabled)
 
     def set_dictate_engine(self, engine):
-        """切识别引擎：local（本地流式 zipformer）/ online（配置的 HTTP 通道）。"""
+        """切识别引擎：local（本地 SenseVoice）/ xfyun（讯飞听写）。
+
+        切到 xfyun 时顺手把本地模型放掉（省 299MB）—— 不留着占内存，
+        反正切回来时 _warm_up 会在后台重新加载。
+        """
         if self.dictate is None:
             return dict(ok=False, reason='disabled')
-        if engine == 'online' and not self.dictate.online_ready():
-            self._notify('在线识别未配置：在 .env 里填 ASR_ONLINE_URL / ASR_ONLINE_KEY')
+        if engine == 'xfyun' and not self.dictate.online_ready():
+            self._notify('讯飞听写未配置：在 .env 里填 TTS_XFYUN_APPID / API_KEY / API_SECRET')
             return dict(ok=False, reason='not_configured')
         self.dictate.engine = engine
+        if engine != 'local':
+            try:
+                from core import asr
+                asr.LOCAL.unload()
+            except Exception:
+                pass
+        else:
+            self.dictate._warm_up()
         self._save_pref()
         self._refresh_tray()
-        label = '本地' if engine == 'local' else '在线'
+        label = '本地模型' if engine == 'local' else '讯飞听写（在线）'
         self._notify(f'语音识别引擎 → {label}')
         return dict(ok=True, engine=engine)
 
@@ -353,10 +367,14 @@ class App:
     def _load_asr_engine_pref(self):
         try:
             d = json.loads(self._pref_file().read_text(encoding='utf-8'))
-            v = str(d.get('asr_engine') or 'local').strip()
-            return v if v in ('local', 'online') else 'local'
+            v = str(d.get('asr_engine') or '').strip().lower()
+            if v in ('online', 'edge'):
+                v = 'xfyun'                     # 旧版本存的 online 就是「在线识别」
+            if v in ('local', 'xfyun'):
+                return v
         except Exception:
-            return 'local'
+            pass
+        return config.ASR_ENGINE
 
     def _save_pref(self):
         try:
@@ -392,33 +410,48 @@ class App:
         self._refresh_tray()
         return r
 
+    def _voice_label(self, v):
+        """音色显示名：逻辑名带上该引擎的实际音色，具体音色查表。"""
+        kind = self._engine
+        if v == 'female':
+            if kind == 'xfyun':
+                return '女声（%s）' % config.XFYUN_VOICE_FEMALE
+            if kind == 'edge':
+                return '女声（%s）' % config.EDGE_VOICE_FEMALE
+            return '女声'
+        if v == 'male':
+            if kind == 'xfyun':
+                return '男声（%s）' % config.XFYUN_VOICE_MALE
+            if kind == 'edge':
+                return '男声（%s）' % config.EDGE_VOICE_MALE
+            return '男声'
+        return dict(config.voice_choices(kind)).get(v, v)
+
     def set_voice(self, voice):
-        """切换音色（下次朗读生效，正在播的不打断）。本地模式只认男女声。"""
+        """切换音色（下次朗读生效，正在播的不打断）。音色表跟着引擎走。"""
         v = str(voice or '').strip()
         if not v:
             return dict(ok=False, reason='bad_voice')
-        if not self.engine_online and v not in ('female', 'male'):
-            self._notify('在线音色只在在线模式下可用（托盘切换语音引擎）')
-            return dict(ok=False, reason='local_engine')
+        if not config.voice_ok(v, self._engine):
+            self._notify(f'这个音色在当前引擎（{config.ENGINE_LABELS.get(self._engine, self._engine)}）下不可用')
+            return dict(ok=False, reason='bad_voice_for_engine')
         self.voice = v
         self._save_pref()
-        if v in ('female', 'male'):
-            label = '女声' if v == 'female' else '男声'
-        else:
-            from core.engine_online import ONLINE_VOICES
-            label = dict(ONLINE_VOICES).get(v, v)
         log.info('音色 → %s（下次朗读生效）', v)
-        self._notify(f'音色已切换：{label}')
+        self._notify(f'音色已切换：{self._voice_label(v)}')
         self._refresh_tray()
         return dict(ok=True, voice=v)
 
     # ---------------------------- 引擎切换 ----------------------------
 
     @property
-    def engine_online(self):
-        # 不读 config.ENGINE —— 那是本进程 import 时的常量，切完引擎它不会变，
-        # 托盘标签会永远显示旧引擎。以服务实际报的引擎为准，启动后同步一次。
-        return self._engine == 'online'
+    def engine_edge(self):
+        return self._engine == 'edge'
+
+    @property
+    def engine_kind(self):
+        """当前引擎：local / xfyun / edge（托盘勾选与音色校验都按它）"""
+        return self._engine
 
     def _sync_engine(self):
         """从服务 health 同步当前引擎；服务没起来就保持原值"""
@@ -434,25 +467,34 @@ class App:
     def switching(self):
         return self._switching
 
+    # 三个引擎的循环顺序：托盘只传明确值，这个循环只给「不带参数调用」兜底
+    _ENGINE_CYCLE = ('local', 'xfyun', 'edge')
+
     def switch_engine(self, kind=None):
-        """本地 ↔ 在线 一键切换：写 .env → 重启服务进程 → 播报结果。
+        """本地 / 讯飞 / Edge 一键切换：写 .env → 重启服务进程 → 播报结果。
 
         为什么是重启进程而不是就地换引擎：省内存靠的是新进程不加载 ONNX
-        （本地 ~820MB → 在线 ~100MB），同一进程里卸不掉 onnxruntime 的arena。
+        （本地 ~820MB → 在线 ~100MB），同一进程里卸不掉 onnxruntime 的 arena。
         切换是异步的（本地引擎要 ~10s），结果走托盘气泡通知。
         """
         if self._switching:
             self._notify('正在切换中，等切换完成（气泡通知）后再点')
             return
         cur = self._sync_engine()
-        target = kind or ('local' if cur == 'online' else 'online')
+        if kind:
+            target = str(kind).strip().lower()
+        else:
+            i = self._ENGINE_CYCLE.index(cur) if cur in self._ENGINE_CYCLE else 0
+            target = self._ENGINE_CYCLE[(i + 1) % len(self._ENGINE_CYCLE)]
+        if target not in config.ENGINE_LABELS:
+            self._notify(f'未知引擎：{target}')
+            return
         if target == cur:
-            self._notify(f'当前已是{"在线" if target == "online" else "本地"}引擎')
+            self._notify(f'当前已是{config.ENGINE_LABELS[target]}引擎')
             return
         self._switching = True
         self._refresh_tray()        # 托盘引擎项立刻变「切换中…」并置灰
-        self._notify(f'正在切换到{"在线模型（Edge TTS）" if target == "online" else "本地模型"}，'
-                     f'服务重启中…')
+        self._notify(f'正在切换到{config.ENGINE_LABELS[target]}，服务重启中…')
         threading.Thread(target=self._do_switch, args=(target,), daemon=True,
                          name='engine-switch').start()
 
@@ -469,13 +511,15 @@ class App:
             if self._engine != target:
                 self._notify(f'切换未生效（服务报的是 {self._engine}），看看日志')
                 return
-            if target == 'local' and self.voice not in ('female', 'male'):
-                # 之前选的是在线音色，本地引擎不认识：复位回默认女声并记盘
+            # 音色跟着引擎走：zf_001 在 Edge 上、zh-CN-XiaoxiaoNeural 在讯飞上都会被拒，
+            # 统一按目标引擎的可选表清洗一遍，别让第一次朗读就失败
+            if not config.voice_ok(self.voice, target):
+                log.info('音色复位 → %s（%s 的音色表见 config.voice_choices）',
+                         config.VOICE_DEFAULT, target)
                 self.voice = config.VOICE_DEFAULT
                 self._save_pref()
-                log.info('音色复位 → %s（本地引擎只有男女声）', self.voice)
-            label = '在线模型' if target == 'online' else '本地模型'
-            self._notify(f'已切换到{label}（内存 {h.get("rss_mb")}MB），直接划词即可')
+            self._notify(f'已切换到{config.ENGINE_LABELS[target]}'
+                         f'（内存 {h.get("rss_mb")}MB），直接划词即可')
         except Exception as e:
             log.error('切换引擎到 %s 失败: %s', target, e, exc_info=True)
             self._notify(f'切换失败：{e}（服务可能没起来，重启程序恢复）')

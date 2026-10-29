@@ -90,7 +90,8 @@ class TaskStore:
         self.root = Path(root)
         (self.root / 'task').mkdir(parents=True, exist_ok=True)
         self.keep = keep
-        self.gap_s = (config.CHUNK_GAP_MS if gap_ms is None else gap_ms) / 1000.0
+        # 块间留白按引擎取（config.GAP_MS：本地 50ms / 讯飞 300ms，见 .env 注释）
+        self.gap_s = (config.GAP_MS if gap_ms is None else gap_ms) / 1000.0
         self.tasks = {}
         self.lock = threading.Lock()
         self.synth_lock = threading.Lock()  # 模型同一时刻只跑一次前向
@@ -108,7 +109,8 @@ class TaskStore:
         if not plan:
             raise ValueError('切块后为空')
         tid = uuid.uuid4().hex[:16]
-        t = Task(tid, text, config.voice_id(voice), float(rate or config.RATE_DEFAULT),
+        # 音色名按引擎归一：本地落成 zf_001/zm_029，讯飞保留 female/male 交给引擎映射
+        t = Task(tid, text, config.resolve_voice(voice), float(rate or config.RATE_DEFAULT),
                  plan, self.root, self.gap_s)
         with self.lock:
             self.tasks[tid] = t

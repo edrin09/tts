@@ -3,10 +3,14 @@
 # 复原：uv venv --python 3.12 .venv
 #       uv pip install -r requirements.txt
 #
+# 2026-10-29 引擎三选一：本地 ONNX / 讯飞 WebAPI（国内直连，TTS+听写）/
+# Edge TTS（免费不限量，音质最好，端点境外）。Edge 这次是「加回来当第三选项」，
+# 所以 edge-tts 重新成为直接依赖；讯飞的 ws 握手仍用 websocket-client。
+#
 # 2026-10-28 精简：原始 101 包 → 81 包（卸掉 pydantic/httpx2/cryptography/
 # loguru/msgpack/fsspec/smart-open/narwhals 等 19 个从没被引用过的残留 + pip 自身）。
 # 卸载前后做了逐字节回归：G2P 音素串哈希、合成音频采样点数、时长全部一致，
-# 在线 edge-tts、本地 ONNX、ASR(SenseVoice int8) 三条链路均实测通过。
+# 本地 ONNX、ASR(SenseVoice int8) 两条链路均实测通过。
 #
 # 注意：本项目已封版，版本号全部钉死，升级任何一个都可能改变中文 G2P 行为。
 
@@ -17,6 +21,8 @@ onnxruntime==1.31.1
 numpy==2.5.4
 misaki==0.9.4
 jieba==0.42.1
+websocket-client==1.9.2
+# Edge 引擎：微软神经语音客户端（自带 Sec-MS-GEC 校验，别降级到 6.x，会 403）
 edge-tts==7.3.1
 sounddevice==0.5.6
 soundfile==0.14.0
