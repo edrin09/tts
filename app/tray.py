@@ -1,5 +1,6 @@
-"""托盘：唯一的可视入口。菜单只做「控制」和「退出」，不做朗读——
-朗读靠划词浮窗（选中文字松手后弹出）。
+"""托盘：系统级入口。菜单只留引擎/语音输入设置和系统项（开机自启/退出）——
+语速、音色在划词浮窗上调，播放控制（暂停/上下句/停止）走浮窗和快捷键，
+托盘一律不放。
 """
 import logging
 import threading
@@ -32,116 +33,75 @@ class Tray:
         self.icon = None
         self._ready = threading.Event()
 
-    def _pause_text(self, item=None):
-        return '继续' if self.app.player.paused else '暂停'
-
     def build_menu(self):
+        """菜单结构在启动时建一次；勾选/标题等状态项用 lambda 动态取值，
+        值变了靠 app 层调 icon.update_menu() 刷新。"""
         import pystray
         from app.app import autostart_enabled   # 是模块级函数，不是 App 的方法
 
-        def rate_action(r):
-            # 不能写成 lambda icon, item, r=r: ... —— pystray 用 co_argcount 校验
-            # 回调，只接受 0/1/2 个位置参数，带默认值的第三个参数会被判非法
-            # （ValueError，整个托盘线程直接挂掉，症状是「启动后没有图标」）
+        # 二选一 radio 子菜单的通用写法：pystray 用 co_argcount 校验回调，
+        # 只接受 0/1/2 个位置参数，不能写 lambda icon, item, x=r: ...
+        # （整个托盘线程会挂，症状是「启动后没有图标」），一律闭包工厂。
+        def switch_action(method, value):
             def act(icon, item):
-                return self.app.set_rate(r)
+                return method(value)
             return act
 
-        rate_items = [
-            pystray.MenuItem(
-                f'{r:.2f}×',
-                rate_action(r),
-                checked=lambda item, r=r: abs(self.app.rate - r) < 1e-6,
-                radio=True)
-            for r in self.app.rates
-        ]
-
-        # 音色子菜单（下拉选择）：跟随引擎——本地只有男女声；在线才出现神经音色。
-        # 切引擎时 App 会把本地不认识的音色复位回女声，所以这里不会出现「选了
-        # 在线音色但引擎是本地」的悬空状态。
-        def voice_action(v):
-            def act(icon, item):
-                return self.app.set_voice(v)
-            return act
-
-        voice_items = [
-            pystray.MenuItem('女声（默认）', voice_action('female'), radio=True,
-                             checked=lambda item: self.app.voice == 'female'),
-            pystray.MenuItem('男声', voice_action('male'), radio=True,
-                             checked=lambda item: self.app.voice == 'male'),
-        ]
-        if self.app.engine_online:
-            from core.engine_online import ONLINE_VOICES
-            voice_items += [
-                pystray.MenuItem(label, voice_action(vid), radio=True,
-                                 checked=lambda item, vid=vid: self.app.voice == vid)
-                for vid, label in ONLINE_VOICES
-            ]
-        # 语音引擎子菜单（下拉二选一，样式与「识别引擎」一致）：点选即切换，
-        # 不再是「点一下就换另一边」的开关式单项——避免想看看当前是哪个引擎
-        # 却不小心把引擎切了。
-        def engine_action(kind):
-            def act(icon, item):
-                return self.app.switch_engine(kind)
-            return act
-
+        # 语音引擎：切换要 10~14s，切换中由 App 把菜单项置灰挡重复点击
         engine_menu = pystray.Menu(
             pystray.MenuItem('在线模型',
-                             engine_action('online'), radio=True,
+                             switch_action(self.app.switch_engine, 'online'),
+                             radio=True,
                              enabled=lambda item: not self.app.switching,
                              checked=lambda item: self.app.engine_online
                              and not self.app.switching),
             pystray.MenuItem('本地模型',
-                             engine_action('local'), radio=True,
+                             switch_action(self.app.switch_engine, 'local'),
+                             radio=True,
                              enabled=lambda item: not self.app.switching,
                              checked=lambda item: not self.app.engine_online
                              and not self.app.switching))
 
+        # 识别引擎：在线项仅在 .env 配好 ASR_ONLINE_URL/KEY 时可点
+        asr_menu = pystray.Menu(
+            pystray.MenuItem('本地模型',
+                             switch_action(self.app.set_dictate_engine, 'local'),
+                             radio=True,
+                             checked=lambda item: bool(self.app.dictate and
+                                                       self.app.dictate.engine == 'local')),
+            pystray.MenuItem('在线模型',
+                             switch_action(self.app.set_dictate_engine, 'online'),
+                             radio=True,
+                             enabled=lambda item: bool(self.app.dictate and
+                                                       self.app.dictate.online_ready()),
+                             checked=lambda item: bool(self.app.dictate and
+                                                       self.app.dictate.engine == 'online')))
+
+        # 语音输入：定向开/关（点「开」就是开，不会翻转），首次开才初始化听写
+        dictate_menu = pystray.Menu(
+            pystray.MenuItem('开',
+                             switch_action(self.app.set_dictate_enabled, True),
+                             radio=True,
+                             checked=lambda item: bool(self.app.dictate and
+                                                       self.app.dictate.enabled)),
+            pystray.MenuItem('关',
+                             switch_action(self.app.set_dictate_enabled, False),
+                             radio=True,
+                             checked=lambda item: bool(self.app.dictate and
+                                                       not self.app.dictate.enabled)))
+
         return pystray.Menu(
-            # ---- 朗读控制 ----
-            pystray.MenuItem(self._pause_text, lambda: self.app.toggle(), default=True),
-            pystray.MenuItem('上一句', lambda: self.app.prev(),
-                             enabled=lambda item: not self.app.switching),
-            pystray.MenuItem('下一句', lambda: self.app.next(),
-                             enabled=lambda item: not self.app.switching),
-            pystray.MenuItem('重读当前', lambda: self.app.repeat(),
-                             enabled=lambda item: not self.app.switching),
-            pystray.MenuItem('接着听上次', lambda: self.app.resume_last(),
-                             enabled=lambda item: not self.app.switching),
-            pystray.MenuItem('停止', lambda: self.app.stop()),
-            pystray.Menu.SEPARATOR,
-            # ---- 朗读设置 ----
-            pystray.MenuItem('倍速', pystray.Menu(*rate_items)),
-            pystray.MenuItem('音色', pystray.Menu(*voice_items)),
-            pystray.Menu.SEPARATOR,
-            # ---- 引擎与语音输入（两个引擎放一起）----
             pystray.MenuItem(
                 lambda item: ('语音引擎：切换中…' if self.app.switching else '语音引擎'),
                 engine_menu,
                 enabled=lambda item: not self.app.switching),
-            pystray.MenuItem('识别引擎', pystray.Menu(
-                pystray.MenuItem('本地模型',
-                                 lambda: self.app.set_dictate_engine('local'),
-                                 radio=True,
-                                 checked=lambda item: bool(self.app.dictate and
-                                                           self.app.dictate.engine == 'local')),
-                pystray.MenuItem('在线模型',
-                                 lambda: self.app.set_dictate_engine('online'),
-                                 radio=True,
-                                 enabled=lambda item: bool(self.app.dictate and
-                                                           self.app.dictate.online_ready()),
-                                 checked=lambda item: bool(self.app.dictate and
-                                                           self.app.dictate.engine == 'online')))),
+            pystray.MenuItem('识别引擎', asr_menu),
             pystray.MenuItem(
                 lambda item: ('语音输入：听写中…' if (self.app.dictate and
                               self.app.dictate.state in ('recording', 'finishing')) else
-                              ('语音输入：开（按住 Alt 说话）' if self.app.dictate
-                               and self.app.dictate.enabled else
-                               '语音输入：关（点击开启）')),
-                lambda: self.app.toggle_dictate(),
-                checked=lambda item: bool(self.app.dictate and self.app.dictate.enabled)),
+                              '语音输入'),
+                dictate_menu),
             pystray.Menu.SEPARATOR,
-            # ---- 系统 ----
             pystray.MenuItem('开机自启', lambda: self.app.toggle_autostart(),
                              checked=lambda item: autostart_enabled()),
             pystray.MenuItem('退出', lambda: self.app.quit()),

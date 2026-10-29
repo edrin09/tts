@@ -135,7 +135,7 @@ class Engine:
     def _block(self, text, pack, rate=1.0):
         t = time.perf_counter()
         ps = self.phonemes(text)
-        # 最终语速 = 自动长句降速 × 用户倍速（两者相乘，见 ROADMAP 1.4）
+        # 最终语速 = 自动长句降速 × 用户倍速（两者相乘）
         speed = chunker.speed_for(len(ps), config.SPEED_BASE, config.SPEED_LONG_FROM,
                                   config.SPEED_LONG_FLOOR, config.SPEED_SLOPE) * rate
         a = self._infer(ps, pack, speed)

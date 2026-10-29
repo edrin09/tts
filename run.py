@@ -85,7 +85,7 @@ def _mutex(name='TTS-Speak-single'):
 
     GetLastError 必须走 use_last_error=True + ctypes.get_last_error()：
     windll.kernel32.GetLastError() 的读数在 pythonw 下不可靠（ctypes 可能在
-    两次调用之间动过线程错误码），2026-10-28 实测导致托盘模式下双开成功。
+    两次调用之间动过线程错误码），会导致托盘模式下双开成功。
     """
     k32 = ctypes.WinDLL('kernel32', use_last_error=True)
     k32.CreateMutexW.restype = ctypes.c_void_p   # 句柄 64 位，默认 c_int 会截断
@@ -143,7 +143,7 @@ def stop_service(proc=None, wait_s=8):
     """干净收尾：循环 shutdown 直到端口没人应答为止。
 
     为什么要循环：Windows 的 SO_REUSEADDR 允许重复绑定（见 server.existing_service），
-    历史事故可能留下多个监听者，关掉一个端口上还有僵尸在答 health——那就再发
+    可能有多个监听者，关掉一个端口上还有僵尸在答 health——那就再发
     一次 shutdown，直到清空或超时。
     """
     from app.client import Client
@@ -223,7 +223,7 @@ def preflight():
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description='TTS 朗读阶段一启动器')
+    ap = argparse.ArgumentParser(description='TTS 朗读启动器')
     ap.add_argument('--tray', action='store_true', help='启动托盘（默认）')
     ap.add_argument('--no-tray', action='store_true', help='只起服务，不起托盘')
     ap.add_argument('--no-hotkeys', action='store_true', help='不装全局钩子（排障用）')

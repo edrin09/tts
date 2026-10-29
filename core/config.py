@@ -99,7 +99,7 @@ REPO_ID = get('TTS_REPO_ID', 'onnx-community/Kokoro-82M-v1.1-zh-ONNX')
 LANG_CODE = get('TTS_LANG_CODE', 'z')
 SAMPLE_RATE = get_int('TTS_SAMPLE_RATE', 24000)
 
-# 执行引擎换成了 ONNX：不再有 .pth 权重，模型就是这个 onnx 文件
+# ONNX 模型文件（无 .pth 权重，模型就是这个 onnx 文件）
 ONNX_MODEL = get_path('TTS_ONNX_MODEL', MODEL_DIR / 'onnx' / 'model.onnx')
 ONNX_BYTES = get_int('TTS_ONNX_BYTES', 339369442)
 ONNX_SHA256 = get('TTS_ONNX_SHA256', '')
@@ -124,7 +124,7 @@ SECOND_CHUNK_MAX = get_int('TTS_SECOND_CHUNK_MAX', 14)
 CHUNK_RAMP = [int(x) for x in str(get('TTS_CHUNK_RAMP', '8,10,20,40')).replace('，', ',')
               .split(',') if x.strip()]
 # 短文本整句合成的阈值（字）：≤ 它的文本不切块
-# 0 = 关闭（永远按 first_chunk 切，首字最快）；设成 40 就还原「用户验收那版」的整句听感
+# 0 = 关闭（永远按 first_chunk 切，首字最快）；调大可换整句听感
 NOSPLIT_CHARS = get_int('TTS_NOSPLIT_CHARS', 0)
 CHUNK_MAX = get_int('TTS_CHUNK_MAX', 60)
 CHUNK_GAP_MS = get_int('TTS_CHUNK_GAP_MS', 50)
@@ -143,15 +143,17 @@ ENGINE = get('TTS_ENGINE', 'local').strip().lower()
 if ENGINE not in ('local', 'online'):
     ENGINE = 'local'
 
-# ---------------------------- 阶段一：服务 / 播放 / 倍速 ----------------------------
+# ---------------------------- 服务 / 播放 / 倍速 ----------------------------
 
 # 日志体系已拆除（无 LOG_DIR、不落盘）；见 run.py / service/server.py 的 disable 说明
 
 # 用户看到的倍速档位；内部 1.0× 对应的真实 speed 是 SPEED_BASE(1.1)
 RATE_DEFAULT = get_float('TTS_RATE_DEFAULT', 1.0)
-RATES = [float(x) for x in str(get('TTS_RATES', '0.75,1.0,1.25,1.5')).split(',') if x.strip()]
+# 自定义倍速的允许范围：浮窗「自定义」输入框按它校验，偏好存盘也按它兜底
+RATE_MIN = get_float('TTS_RATE_MIN', 0.5)
+RATE_MAX = get_float('TTS_RATE_MAX', 3.0)
 
-# 播放器向前预取的缓冲秒数（ROADMAP 要求 ≥3s）
+# 播放器向前预取的缓冲秒数（≥3s 才能盖住单块合成耗时）
 PREFETCH_S = get_float('TTS_PREFETCH_S', 3.0)
 # 预取高水位：低于它就继续拉下一块（只按 3s 预取会让 60 字块来不及合成）
 BUFFER_HIGH_S = get_float('TTS_BUFFER_HIGH_S', 20.0)

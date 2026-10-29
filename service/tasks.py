@@ -271,11 +271,8 @@ class TaskStore:
             pass
 
     def prune_async(self, min_interval=10.0):
-        """后台清理旧任务。
-
-        以前在 create() 里同步 rmtree，导致 /speak 单次 250ms（实测 prune 234ms），
-        直接把首字预算吃掉六分之一。改成后台 + 10s 节流，/speak 回到毫秒级。
-        """
+        """后台清理旧任务（10s 节流）。清理不能放进 /speak 的同步路径：
+        rmtree 一次 200ms+，会把首字预算直接吃掉。"""
         now = time.time()
         if now - self._last_prune < min_interval:
             return

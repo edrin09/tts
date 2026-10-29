@@ -76,8 +76,7 @@ class App:
 
         self.client = client or Client()
         self.player = Player(self.client, sink=sink, device=device, on_event=self._on_event)
-        self.rates = config.RATES or [0.75, 1.0, 1.25, 1.5]
-        # 当前倍速。没在播的时候也要记住它 —— 浮窗/托盘点倍速时若没有正在读的
+        # 当前倍速。没在播的时候也要记住它 —— 浮窗点自定义语速时若没有正在读的
         # 任务，player 那边无处可切（返回 no_task），但用户的意思是「下次用这个
         # 速度念」，所以偏好存在 App 这一层，speak 时带下去；并落盘，重开还在。
         self.rate = self._load_pref()
@@ -160,7 +159,7 @@ class App:
         高频动作（每选一次都触发一次），不能每次选中都去改剪贴板。UIA 拿不到
         （Electron 里的一部分控件、远程桌面）就不弹。
 
-        取到空必须重试（2026-10-28 的线上回归就是它）：
+        取到空必须重试：
         Chromium/Electron 的 UIA 无障碍树是惰性构建的——重启后第一次查询
         只会触发建树，建好之前 GetSelection 一律返回空。单次尝试 + 静默
         放弃 = 用户划词没反应；实测同一个选区，失败后 14 秒再查就能拿到
@@ -249,13 +248,6 @@ class App:
         self._refresh_tray()
         return info
 
-    def repeat(self):
-        """重读当前（同 task 从头）"""
-        st = self.player.status()
-        if not st['task_id']:
-            return None
-        return self.player.seek(chunk_idx=0)
-
     def toggle(self):
         ok = self.player.toggle()
         self._refresh_tray()
@@ -275,11 +267,11 @@ class App:
         return config.CACHE_DIR / 'pref.json'
 
     def _load_pref(self):
-        """上次用的倍速。读不到或者值不在档位里就回默认。"""
+        """上次用的倍速。预设档位或范围内的自定义值都收；读不到/越界回默认。"""
         try:
             d = json.loads(self._pref_file().read_text(encoding='utf-8'))
             r = float(d.get('rate'))
-            if any(abs(r - x) < 1e-6 for x in self.rates):
+            if config.RATE_MIN <= r <= config.RATE_MAX:
                 return r
         except Exception:
             pass
@@ -318,22 +310,24 @@ class App:
         if self.dictate is not None:
             self.dictate.cancel()
 
-    def toggle_dictate(self):
+    def set_dictate_enabled(self, on):
+        """托盘子菜单用：直接设开/关（toggle 的定向版，状态没变就不动）。
+        首次点「开」时才初始化听写模块，失败不拖累朗读。"""
         if self.dictate is None:
             self._start_dictate()
             if self.dictate is None:
                 self._notify('语音输入不可用（初始化失败，看日志）')
                 return False
-            self.dictate.toggle(True)
-        else:
+        changed = bool(self.dictate.enabled) != bool(on)
+        if changed:
             self.dictate.toggle()
-        self._save_pref()
-        self._refresh_tray()
-        if self.dictate.enabled:
-            self._notify('语音输入已开：按住 Alt 说话，松开打进光标处')
-        else:
-            self._notify('语音输入已关，识别模型已从内存释放')
-        return self.dictate.enabled
+            self._save_pref()
+            self._refresh_tray()
+            if on:
+                self._notify('语音输入已开：按住 Alt 说话，松开打进光标处')
+            else:
+                self._notify('语音输入已关，识别模型已从内存释放')
+        return bool(self.dictate.enabled)
 
     def set_dictate_engine(self, engine):
         """切识别引擎：local（本地流式 zipformer）/ online（配置的 HTTP 通道）。"""
@@ -418,28 +412,12 @@ class App:
         self._refresh_tray()
         return dict(ok=True, voice=v)
 
-    def resume_last(self):
-        try:
-            r = self.player.resume_last()
-        except Exception as e:
-            log.warning('接着听失败: %s', e)
-            return dict(ok=False, reason=str(e))
-        log.info('接着听 task=%s 块=%s 位置=%ss', r.get('task_id'),
-                 r.get('chunk_idx'), r.get('pos_s'))
-        return r
-
-    def stop(self):
-        r = self.player.stop()
-        self._refresh_tray()
-        return r
-
     # ---------------------------- 引擎切换 ----------------------------
 
     @property
     def engine_online(self):
         # 不读 config.ENGINE —— 那是本进程 import 时的常量，切完引擎它不会变，
-        # 托盘标签会永远显示旧引擎（2026-10-28「提示成功但还是在线」的元凶之一）。
-        # 以服务实际报的引擎为准，启动后同步一次。
+        # 托盘标签会永远显示旧引擎。以服务实际报的引擎为准，启动后同步一次。
         return self._engine == 'online'
 
     def _sync_engine(self):
@@ -537,7 +515,8 @@ class App:
                                      on_rate=self.set_rate,
                                      on_voice=self.set_voice,
                                      get_state=self._bubble_state,
-                                     rates=self.rates,
+                                     rate_min=config.RATE_MIN,
+                                     rate_max=config.RATE_MAX,
                                      hide_ms=config.BUBBLE_HIDE_MS).start()
                 if getattr(self.bubble, '_alive', False):
                     log.info('选中浮窗已就绪：划词松手后在鼠标旁弹出'
@@ -560,7 +539,7 @@ class App:
             threading.Thread(target=self.tray.run, kwargs={'block': False},
                              daemon=True, name='tray').start()
             time.sleep(0.3)
-        log.info('应用已就绪（倍速档位 %s）', ', '.join(f'{r:.2f}×' for r in self.rates))
+        log.info('应用已就绪')
         return self
 
     def wait(self):

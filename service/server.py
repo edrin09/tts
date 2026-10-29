@@ -176,7 +176,6 @@ class Handler(BaseHTTPRequestHandler):
             store=STATE['store'].stats() if STATE['store'] else None,
             voices=STATE['voices'],
             rate_default=config.RATE_DEFAULT,
-            rates=config.RATES,
         ))
 
     def _speak(self):

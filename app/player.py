@@ -1,14 +1,14 @@
 """流式播放器：拉块 → 绝对时间轴缓冲 → sounddevice 回调出声。
 
-三条设计约束（都来自 ROADMAP 的验收线）
----------------------------------------
+三条设计约束
+------------
 1. **时间轴用采样点，不用块号**
    `_pos` 是「任务内第几个采样点」。块自带 `offset_s`，于是暂停/续播/跳句
    全都只是改 `_pos`，不需要重建缓冲，也不需要重新合成。
 2. **暂停 = 回调输出静音且不推进 `_pos`**
    音频流不停、音频不丢，继续时零成本（<50ms，实测就是 1 个 callback block）。
 3. **不足就补静音并记 underrun**
-   这既是断流统计，也是 F3 验收「0 次断流」的测量口径：正常播放时
+   这既是断流统计，也是「0 次断流」的测量口径：正常播放时
    underrun 必须一直是 0（块间那 50ms 是时间轴上的空隙，走 silence 计数，不算断流）。
 """
 import logging
@@ -151,7 +151,7 @@ class Player:
         self._gate_s = 0.0          # 起播门槛：攒够这么多缓冲才出声
         self._gate_deadline = 0.0
         self._per_char = None       # 每字合成秒（本任务实测，用于估下一块）
-        self.gate_waits = []        # 每次起播实际等的秒数（验收要看）
+        self.gate_waits = []        # 每次起播实际等的秒数（统计用）
         self.underrun_events = []   # 断流发生时的播放位置（秒），最多记 40 条
         self._t_attach = 0.0
         self._t_first_audio = None
@@ -202,8 +202,7 @@ class Player:
                     return out, 0
             while filled < n:
                 if not self._buf:
-                    # 播到末尾之后没数据是正常的，不能算断流：以前没排除这一段，
-                    # 500 字任务在结尾被误记 25 次"断流"（正好 0.5s 的上报间隔）
+                    # 播到末尾之后没数据是正常的，不能算断流（必须排除这一段）
                     if (self._has_audio and not self._paused
                             and self._pos < self._end_samples):
                         self.underruns += 1  # 该出声时没数据 = 断流
