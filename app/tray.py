@@ -58,7 +58,7 @@ class Tray:
             return not self.app.switching
 
         engine_menu = pystray.Menu(
-            pystray.MenuItem('Edge 在线（免费不限量）',
+            pystray.MenuItem('Edge TTS',
                              switch_action(self.app.switch_engine, 'edge'),
                              radio=True, enabled=enabled_engine,
                              checked=checked_engine('edge')),
