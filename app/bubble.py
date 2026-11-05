@@ -205,11 +205,6 @@ class Bubble:
         if self._alive:
             self._q.put(('hide',))
 
-    def call(self, fn, *args):
-        """让 Tk 线程执行 fn(*args)。只给测试/调试用（Tk 不是线程安全的）。"""
-        if self._alive:
-            self._q.put(('call', fn, args))
-
     def contains(self, x, y):
         """(x, y) 是否落在浮窗上。全局钩子用它决定「这一下点击要不要先隐藏浮窗」。"""
         r = self._rect
@@ -429,11 +424,6 @@ class Bubble:
                 elif cmd[0] == 'refresh':
                     self._state = self._read_state()
                     self._redraw()
-                elif cmd[0] == 'call':
-                    try:
-                        cmd[1](*cmd[2])
-                    except Exception:
-                        log.error('浮窗 call 出错', exc_info=True)
                 elif cmd[0] == 'quit':
                     self._do_hide()
                     self._root.quit()

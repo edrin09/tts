@@ -23,7 +23,6 @@ import ctypes
 import ctypes.wintypes as wt
 import logging
 import threading
-import time
 
 log = logging.getLogger('tts.hotkey')
 
@@ -235,21 +234,3 @@ class Hotkeys:
                     alt_misses=self.alt_misses, thread=self._tid,
                     recent=list(self._recent[-limit:]) if hasattr(self, '_recent') else [])
 
-
-def demo():
-    """命令行自测：不朗读，只打印触发。`python -m app.hotkey`"""
-    hk = Hotkeys(on_toggle=lambda: print('>>> Alt+中键 暂停/继续'),
-                 on_prev=lambda: print('>>> Alt+滚轮上 上一句'),
-                 on_next=lambda: print('>>> Alt+滚轮下 下一句')).start()
-    print('钩子状态:', hk.status())
-    print('按 Alt+中键 / Alt+滚轮，Ctrl+C 退出')
-    try:
-        while True:
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        hk.stop()
-        print('已退出')
-
-
-if __name__ == '__main__':
-    demo()
