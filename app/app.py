@@ -328,7 +328,7 @@ class App:
             if on:
                 self._notify('语音输入已开：按住 Alt 说话，松开打进光标处')
             else:
-                self._notify('语音输入已关，识别模型已从内存释放')
+                self._notify('语音输入已关')
         return bool(self.dictate.enabled)
 
     def set_dictate_engine(self, engine):
