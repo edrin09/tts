@@ -17,3 +17,8 @@ __pycache__/
 # ---- 工具临时 ----
 .workbuddy/tmp/
 /.workbuddy
+
+# ---- 密钥：绝不入库 ----
+.env
+.env.local
+!.env.example
